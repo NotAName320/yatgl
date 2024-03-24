@@ -1,5 +1,5 @@
 # yatgl
-Yet Anoter TeleGram Library (YATGL) is a Telegram library for NationStates.
+Yet Another TeleGram Library (YATGL) is a Telegram library for NationStates.
 
 To use it, run
 ```commandline
