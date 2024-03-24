@@ -18,10 +18,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from setuptools import setup
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 
 setup(name='yatgl',
-      version='0.0.1',
+      version='0.0.2',
       description='An asynchronous NationStates Telegram API library.',
+      long_description=long_description,
+      long_description_content_type='text/markdown',
       url='https://github.com/NotAName320/yatgl',
       author='Nota',
       license='GPLv3',
