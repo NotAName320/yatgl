@@ -27,7 +27,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '0.0.3'
+VERSION = '1.0.1'
 
 
 logger = getLogger(__name__)
