@@ -89,7 +89,7 @@ class Client(metaclass=_ClientMeta):
     sent = set()
     queue: deque[TelegramRequest] = deque()
     _tg_task = None
-    _queueing_task = None
+    _queueing_tasks = []
     _session: aiohttp.ClientSession = None
 
     def __init__(self, **kwargs):
@@ -138,9 +138,11 @@ class Client(metaclass=_ClientMeta):
         Stops sending telegrams and/or queueing if the client has started, otherwise does nothing.
         """
         if self._tg_task:
-            self._tg_task.cancel(), self._queueing_task.cancel()
+            self._tg_task.cancel()
+            for task in self._queueing_tasks:
+                task.cancel()
             await self._session.close()
-            self._tg_task, self._queueing_task = None, None
+            self._tg_task, self._queueing_tasks = None, []
 
     async def mass_telegram(self, template: Template, group: NationGroup, region: Iterable[str] = None):
         """
@@ -157,8 +159,9 @@ class Client(metaclass=_ClientMeta):
         """
         if not self._session or self._session.closed:
             self._session = aiohttp.ClientSession()
-        self._queueing_task = asyncio.create_task(self._mass_queue(template, group, region))
-        await asyncio.gather(self.start(), self._queueing_task)
+        task = asyncio.create_task(self._mass_queue(template, group, region))
+        self._queueing_tasks.append(task)
+        await asyncio.gather(self.start(), task)
 
     async def _mass_queue(self, template: Template, group: NationGroup, regions: str | Iterable[str] | None):
         if group in {NationGroup.ALL_REGION_MEMBERS, NationGroup.NEW_REGION_MEMBERS} and not regions:
