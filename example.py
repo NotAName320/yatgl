@@ -18,31 +18,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
 
-from yatgl import Client, Template
-
-
-async def add_some_tgs():
-    while True:
-        print('inserted 3 more telegrams into queue')
-        Client().queue_tg(Template('secret key', 'tgid'), '1')
-        Client().queue_tg(Template('secret key', 'tgid'), '2')
-        Client().queue_tg(Template('secret key', 'tgid'), '3')
-        await asyncio.sleep(500)
+from yatgl import Client, NationGroup, Template
 
 
 async def main():
     # Lazy initialization with singleton
-    Client(client_key='client key here')
+    Client(client_key='client key here', user_agent='nation here')
 
     # If you want, you can change the delay, like so:
     # Client(delay=200)
 
-    # Queue some telegrams
-    Client().queue_tg(Template('secret key', 'tgid'), 'nation here')
+    # You can queue telegrams manually...
     Client().queue_tg(Template('secret key', 'tgid'), 'nation here')
 
     try:
-        await asyncio.gather(Client().start(), add_some_tgs())
+        # ...or you can use a mass telegram function
+        await Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_FOUNDS)
+
+        # or you can use multiple with asyncio.gather e.g.
+        # func1 = Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_FOUNDS)
+        # func2 = Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_REGION_MEMBERS, 'testregionia')
+        # await asyncio.gather(func1, func2)
     except KeyboardInterrupt:
         await Client().stop()
 

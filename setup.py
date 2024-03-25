@@ -14,7 +14,6 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 """
 
 from setuptools import setup
@@ -24,7 +23,7 @@ long_description = (this_directory / "README.md").read_text()
 
 
 setup(name='yatgl',
-      version='0.0.2',
+      version='1.0.0',
       description='An asynchronous NationStates Telegram API library.',
       long_description=long_description,
       long_description_content_type='text/markdown',
@@ -33,6 +32,8 @@ setup(name='yatgl',
       license='GPLv3',
       packages=['yatgl'],
       install_requires=[
-          'aiohttp[speedups]'
+            'aiohttp[speedups]',
+            'beautifulsoup4',
+            'lxml'
       ],
       zip_safe=False)

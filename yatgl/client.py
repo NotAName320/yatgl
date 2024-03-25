@@ -17,11 +17,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import asyncio
-from logging import getLogger
 from collections import deque
+from collections.abc import Iterable
+from enum import Enum
+from logging import getLogger
 from typing import NamedTuple
 
 import aiohttp
+from bs4 import BeautifulSoup
+
+API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
+VERSION = '0.0.3'
 
 
 logger = getLogger(__name__)
@@ -35,6 +41,15 @@ class Template(NamedTuple):
 class TelegramRequest(NamedTuple):
     template: Template
     recipient: str
+
+
+class NationGroup(Enum):
+    NEW_WA_MEMBERS = 0
+    ALL_WA_MEMBERS = 1
+    NEW_FOUNDS = 2
+    ALL_WA_DELEGATES = 3
+    NEW_REGION_MEMBERS = 4
+    ALL_REGION_MEMBERS = 5
 
 
 class _ClientMeta(type):
@@ -69,11 +84,13 @@ class Client(metaclass=_ClientMeta):
     >>>asyncio.run(Client().start())
     """
     client_key: str = None
+    user_agent: str = None
     delay: int = 185
     sent = set()
     queue: deque[TelegramRequest] = deque()
-    _task = None
-    _session: aiohttp.ClientSession
+    _tg_task = None
+    _queueing_task = None
+    _session: aiohttp.ClientSession = None
 
     def __init__(self, **kwargs):
         """
@@ -84,6 +101,8 @@ class Client(metaclass=_ClientMeta):
         """
         if 'client_key' in kwargs:
             self.client_key = kwargs.pop('client_key')
+        if 'user_agent' in kwargs:
+            self.user_agent = kwargs.pop('user_agent')
         if 'delay' in kwargs:
             delay = kwargs.pop('delay')
             if delay < 30:
@@ -106,19 +125,145 @@ class Client(metaclass=_ClientMeta):
         """
         if not self.client_key:
             raise AttributeError('No client key provided.')
-        if not self._task:
-            self._task = asyncio.create_task(self._process_stack())
-            self._session = aiohttp.ClientSession()
-            await self._task
+        if not self.user_agent:
+            raise AttributeError('Please set a User Agent.')
+        if not self._tg_task:
+            self._tg_task = asyncio.create_task(self._process_stack())
+            if not self._session or self._session.closed:
+                self._session = aiohttp.ClientSession()
+            await self._tg_task
 
     async def stop(self):
         """
-        Stops sending telegrams if the client has started, otherwise does nothing.
+        Stops sending telegrams and/or queueing if the client has started, otherwise does nothing.
         """
-        if self._task:
-            self._task.cancel()
+        if self._tg_task:
+            self._tg_task.cancel(), self._queueing_task.cancel()
             await self._session.close()
-            self._task = None
+            self._tg_task, self._queueing_task = None, None
+
+    async def mass_telegram(self, template: Template, group: NationGroup, region: Iterable[str] = None):
+        """
+        Starts the telegram queue while autoqueueing a certain group of nations using the API.
+
+        Ensure that a client key has been provided.
+
+        Note that when getting these nations, the client ignores ratelimits, which should be fine for most cases as
+        the requests are sparse enough that they're well under, but might break e.g. if targeting nations joining one of
+        50 regions, in which it may be time to reevaluate your region's foreign policy.
+        :param template: The template to send to the nations.
+        :param group: The group of nations to target specified by the enum :class:`NationGroup`.
+        :param region: A list of regions.
+        """
+        if not self._session or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        self._queueing_task = asyncio.create_task(self._mass_queue(template, group, region))
+        await asyncio.gather(self.start(), self._queueing_task)
+
+    async def _mass_queue(self, template: Template, group: NationGroup, regions: str | Iterable[str] | None):
+        if group in {NationGroup.ALL_REGION_MEMBERS, NationGroup.NEW_REGION_MEMBERS} and not regions:
+            raise AttributeError('Region(s) not provided to client.')
+        elif isinstance(regions, str):
+            regions = [regions]
+
+        # why did i code it like this?
+        if group.value % 2 == 1:
+            # here's where i throw good software principles out the book in favor of huge ass switch statements
+            match group:
+                case NationGroup.ALL_REGION_MEMBERS:
+                    for region in regions:
+                        for nation in await self._get_region_members(region):
+                            self.queue_tg(template, nation)
+
+                case NationGroup.ALL_WA_MEMBERS:
+                    for nation in await self._get_wa_members():
+                        self.queue_tg(template, nation)
+
+                case NationGroup.ALL_WA_DELEGATES:
+                    for nation in await self._get_wa_delegates():
+                        self.queue_tg(template, nation)
+        else:
+            # generate a list of nations to not send messages to
+            existing = set()
+            if group is NationGroup.NEW_REGION_MEMBERS:
+                for region in regions:
+                    existing.update(await self._get_region_members(region))
+            elif group is NationGroup.NEW_WA_MEMBERS:
+                existing = set(await self._get_wa_members())
+
+            while True:
+                match group:
+                    case NationGroup.NEW_REGION_MEMBERS:
+                        for region in regions:
+                            for nation in await self._get_region_members(region):
+                                if nation not in existing:
+                                    self.queue_tg(template, nation)
+                                    existing.add(nation)
+
+                    case NationGroup.NEW_WA_MEMBERS:
+                        for member in await self._get_wa_members():
+                            if member not in existing:
+                                self.queue_tg(template, member)
+                                existing.add(member)
+
+                    case NationGroup.NEW_FOUNDS:
+                        for nation in await self._get_new_founds():
+                            if nation not in existing:
+                                self.queue_tg(template, nation)
+                                existing.add(nation)
+
+                await asyncio.sleep(60)
+
+    async def _get_region_members(self, region: str) -> list[str]:
+        data = {
+            'q': 'nations',
+            'region': region
+        }
+        headers = {
+            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
+        }
+
+        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+            parsed = BeautifulSoup(await resp.text(), 'xml')
+            return parsed.REGION.NATIONS.string.split(':')
+
+    async def _get_wa_members(self) -> list[str]:
+        data = {
+            'q': 'members',
+            'wa': '1'
+        }
+        headers = {
+            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
+        }
+
+        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+            parsed = BeautifulSoup(await resp.text(), 'xml')
+            return parsed.WA.MEMBERS.string.split(',')
+
+    async def _get_wa_delegates(self) -> list[str]:
+        data = {
+            'q': 'delegates',
+            'wa': '1'
+        }
+        headers = {
+            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
+        }
+
+        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+            parsed = BeautifulSoup(await resp.text(), 'xml')
+            return parsed.WA.DELEGATES.string.split(',')
+
+    async def _get_new_founds(self) -> list[str]:
+        data = {
+            'q': 'newnations'
+        }
+        headers = {
+            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
+        }
+
+        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+            parsed = BeautifulSoup(await resp.text(), 'xml')
+            return parsed.WORLD.NEWNATIONS.string.split(',')
 
     async def _process_stack(self):
         while True:
@@ -137,8 +282,12 @@ class Client(metaclass=_ClientMeta):
             'key': telegram.template.secret_key,
             'to': recipient
         }
-        async with self._session.post('https://www.nationstates.net/cgi-bin/api.cgi', data=data) as resp:
-            if await resp.text() == 'queued':
+        headers = {
+            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
+        }
+
+        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+            if 'queued' in await resp.text():
                 self.sent.add(recipient)
                 logger.info(f'Sent {telegram.template.tgid} to {telegram.recipient}')
             else:
