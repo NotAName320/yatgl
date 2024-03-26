@@ -27,7 +27,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 
 
 logger = getLogger(__name__)
@@ -137,7 +137,12 @@ class Client(metaclass=_ClientMeta):
         if not self._tg_task:
             self._tg_task = asyncio.create_task(self._process_stack())
             if not self._session or self._session.closed:
-                self._session = aiohttp.ClientSession()
+                headers = {
+                    'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
+                                  f'used by nation={self.user_agent.nation_name} in script={self.user_agent.script_name} '
+                                  f'v{self.user_agent.script_version}'
+                }
+                self._session = aiohttp.ClientSession(headers=headers)
             await self._tg_task
 
     async def stop(self):
