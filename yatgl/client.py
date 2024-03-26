@@ -144,8 +144,8 @@ class Client(metaclass=_ClientMeta):
             if not self._session or self._session.closed:
                 headers = {
                     'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
-                                  f'used by nation={self.user_agent.nation_name} in script={self.user_agent.script_name} '
-                                  f'v{self.user_agent.script_version}'
+                                  f'used by nation={self.user_agent.nation_name} in '
+                                  f'script={self.user_agent.script_name} v{self.user_agent.script_version}'
                 }
                 self._session = aiohttp.ClientSession(headers=headers)
             await self._tg_task
