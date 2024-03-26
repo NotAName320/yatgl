@@ -109,6 +109,11 @@ class Client(metaclass=_ClientMeta):
             self.client_key = kwargs.pop('client_key')
         if 'user_agent' in kwargs:
             self.user_agent = kwargs.pop('user_agent')
+            if self._session:
+                self._session.headers['User-Agent'] = (f'yatgl v{VERSION} Developed by nation=Notanam, used by '
+                                                       f'nation={self.user_agent.nation_name} in '
+                                                       f'script={self.user_agent.script_name} '
+                                                       f'v{self.user_agent.script_version}')
         if 'delay' in kwargs:
             delay = kwargs.pop('delay')
             if delay < 30:
