@@ -140,7 +140,7 @@ class Client(metaclass=_ClientMeta):
         if not self.user_agent:
             raise AttributeError('Please set a User Agent.')
         if not self._tg_task:
-            self._tg_task = asyncio.create_task(self._process_stack())
+            self._tg_task = asyncio.create_task(self._process_queue())
             if not self._session or self._session.closed:
                 headers = {
                     'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
@@ -278,7 +278,7 @@ class Client(metaclass=_ClientMeta):
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WORLD.NEWNATIONS.string.split(',')
 
-    async def _process_stack(self):
+    async def _process_queue(self):
         while True:
             if self.queue:
                 await self._send_tg(self.queue.pop())
