@@ -18,12 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
 
-from yatgl import Client, NationGroup, Template
+from yatgl import Client, NationGroup, Template, UserAgent
 
 
 async def main():
     # Lazy initialization with singleton
-    Client(client_key='client key here', user_agent='nation here')
+    user_agent = UserAgent('nation here', 'yatgl example script', '0.0.1')
+    Client(client_key='client key here', user_agent=user_agent)
 
     # If you want, you can change the delay, like so:
     # Client(delay=200)

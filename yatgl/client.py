@@ -27,7 +27,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 
 
 logger = getLogger(__name__)
@@ -41,6 +41,12 @@ class Template(NamedTuple):
 class TelegramRequest(NamedTuple):
     template: Template
     recipient: str
+
+
+class UserAgent(NamedTuple):
+    nation_name: str
+    script_name: str
+    script_version: str
 
 
 class NationGroup(Enum):
@@ -84,7 +90,7 @@ class Client(metaclass=_ClientMeta):
     >>>asyncio.run(Client().start())
     """
     client_key: str = None
-    user_agent: str = None
+    user_agent: UserAgent = None
     delay: int = 185
     sent = set()
     queue: deque[TelegramRequest] = deque()
@@ -106,7 +112,7 @@ class Client(metaclass=_ClientMeta):
         if 'delay' in kwargs:
             delay = kwargs.pop('delay')
             if delay < 30:
-                raise ValueError('Delay can\'t be less than 180.')
+                raise ValueError('Delay can\'t be less than 30.')
             self.delay = delay
 
     def queue_tg(self, template: Template, recipient: str):
@@ -116,6 +122,7 @@ class Client(metaclass=_ClientMeta):
         :param recipient: The nation you want to recieve the telegram.
         """
         self.queue.appendleft(TelegramRequest(template, recipient))
+        logger.debug(f'queued {template.tgid} to {recipient}')
 
     async def start(self):
         """
@@ -158,7 +165,12 @@ class Client(metaclass=_ClientMeta):
         :param region: A list of regions.
         """
         if not self._session or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            headers = {
+                'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
+                              f'used by nation={self.user_agent.nation_name} in script={self.user_agent.script_name} '
+                              f'v{self.user_agent.script_version}'
+            }
+            self._session = aiohttp.ClientSession(headers=headers)
         task = asyncio.create_task(self._mass_queue(template, group, region))
         self._queueing_tasks.append(task)
         await asyncio.gather(self.start(), task)
@@ -222,11 +234,8 @@ class Client(metaclass=_ClientMeta):
             'q': 'nations',
             'region': region
         }
-        headers = {
-            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
-        }
 
-        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+        async with self._session.post(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.REGION.NATIONS.string.split(':')
 
@@ -235,11 +244,8 @@ class Client(metaclass=_ClientMeta):
             'q': 'members',
             'wa': '1'
         }
-        headers = {
-            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
-        }
 
-        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+        async with self._session.post(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WA.MEMBERS.string.split(',')
 
@@ -248,11 +254,8 @@ class Client(metaclass=_ClientMeta):
             'q': 'delegates',
             'wa': '1'
         }
-        headers = {
-            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
-        }
 
-        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+        async with self._session.post(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WA.DELEGATES.string.split(',')
 
@@ -260,11 +263,8 @@ class Client(metaclass=_ClientMeta):
         data = {
             'q': 'newnations'
         }
-        headers = {
-            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
-        }
 
-        async with self._session.post(API_URL, data=data, headers=headers) as resp:
+        async with self._session.post(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WORLD.NEWNATIONS.string.split(',')
 
@@ -285,14 +285,19 @@ class Client(metaclass=_ClientMeta):
             'key': telegram.template.secret_key,
             'to': recipient
         }
-        headers = {
-            'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.user_agent}'
-        }
 
-        async with self._session.post(API_URL, data=data, headers=headers) as resp:
-            if 'queued' in await resp.text():
-                self.sent.add(recipient)
-                logger.info(f'Sent {telegram.template.tgid} to {telegram.recipient}')
-            else:
-                logger.error(f'Telegram errored sending {telegram.template.tgid} to {telegram.recipient}:'
-                             f'{await resp.text()}')
+        while True:
+            async with self._session.post(API_URL, data=data) as resp:
+                if resp.status == 429:
+                    retry_after = int(resp.headers['Retry-After'])
+                    logger.warning(f'Got too many requests error from NationStates sending {telegram.template.tgid} to '
+                                   f'{recipient}! Retrying in {retry_after}s')
+                    await asyncio.sleep(retry_after)
+                elif 'queued' in await resp.text():
+                    self.sent.add(recipient)
+                    logger.info(f'Sent {telegram.template.tgid} to {telegram.recipient}')
+                    break
+                else:
+                    logger.error(f'Telegram errored sending {telegram.template.tgid} to {telegram.recipient}:'
+                                 f'{await resp.text()}')
+                    break
