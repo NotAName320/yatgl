@@ -23,7 +23,7 @@ long_description = (this_directory / "README.md").read_text()
 
 
 setup(name='yatgl',
-      version='1.0.3',
+      version='1.0.4',
       description='An asynchronous NationStates Telegram API library.',
       long_description=long_description,
       long_description_content_type='text/markdown',

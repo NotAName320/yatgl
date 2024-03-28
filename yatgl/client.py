@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import asyncio
 from collections import deque
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 from enum import Enum
 from logging import getLogger
 from typing import NamedTuple
@@ -27,7 +28,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 
 
 logger = getLogger(__name__)
@@ -166,10 +167,6 @@ class Client(metaclass=_ClientMeta):
         Starts the telegram queue while autoqueueing a certain group of nations using the API.
 
         Ensure that a client key has been provided.
-
-        Note that when getting these nations, the client ignores ratelimits, which should be fine for most cases as
-        the requests are sparse enough that they're well under, but might break e.g. if targeting nations joining one of
-        50 regions, in which it may be time to reevaluate your region's foreign policy.
         :param template: The template to send to the nations.
         :param group: The group of nations to target specified by the enum :class:`NationGroup`.
         :param region: A list of regions.
@@ -245,7 +242,7 @@ class Client(metaclass=_ClientMeta):
             'region': region
         }
 
-        async with self._session.post(API_URL, data=data) as resp:
+        async with self._api_request_wait(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.REGION.NATIONS.string.split(':')
 
@@ -255,7 +252,7 @@ class Client(metaclass=_ClientMeta):
             'wa': '1'
         }
 
-        async with self._session.post(API_URL, data=data) as resp:
+        async with self._api_request_wait(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WA.MEMBERS.string.split(',')
 
@@ -265,7 +262,7 @@ class Client(metaclass=_ClientMeta):
             'wa': '1'
         }
 
-        async with self._session.post(API_URL, data=data) as resp:
+        async with self._api_request_wait(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WA.DELEGATES.string.split(',')
 
@@ -274,9 +271,24 @@ class Client(metaclass=_ClientMeta):
             'q': 'newnations'
         }
 
-        async with self._session.post(API_URL, data=data) as resp:
+        async with self._api_request_wait(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WORLD.NEWNATIONS.string.split(',')
+
+    @asynccontextmanager
+    async def _api_request_wait(self, url: str, data: dict):
+        while True:
+            async with self._session.post(url, data=data) as resp:
+                if resp.status == 429:
+                    retry_after = int(resp.headers['Retry-After'])
+                    logger.warning(f'Hit normal API rate limit! Retrying in {retry_after}...')
+                    await asyncio.sleep(retry_after)
+                else:
+                    if remaining := int(resp.headers['RateLimit-Remaining']) <= 7:
+                        logger.info('Getting close to rate limit, slowing down requests a bit...')
+                        await asyncio.sleep(int(resp.headers['RateLimit-Reset']) / remaining)
+                    yield resp
+                    break
 
     async def _process_queue(self):
         while True:
