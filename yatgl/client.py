@@ -20,6 +20,7 @@ import asyncio
 from collections import deque
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import Enum
 from logging import getLogger
 from typing import NamedTuple
@@ -28,7 +29,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '1.0.4'
+VERSION = '1.0.5'
 
 
 logger = getLogger(__name__)
@@ -44,10 +45,15 @@ class TelegramRequest(NamedTuple):
     recipient: str
 
 
-class UserAgent(NamedTuple):
+@dataclass
+class UserAgent:
     nation_name: str
     script_name: str
     script_version: str
+
+    def __str__(self):
+        return (f'yatgl v{VERSION} Developed by nation=Notanam, used by nation={self.nation_name} in '
+                f'script={self.script_name} v{self.script_version}')
 
 
 class NationGroup(Enum):
@@ -111,10 +117,7 @@ class Client(metaclass=_ClientMeta):
         if 'user_agent' in kwargs:
             self.user_agent = kwargs.pop('user_agent')
             if self._session:
-                self._session.headers['User-Agent'] = (f'yatgl v{VERSION} Developed by nation=Notanam, used by '
-                                                       f'nation={self.user_agent.nation_name} in '
-                                                       f'script={self.user_agent.script_name} '
-                                                       f'v{self.user_agent.script_version}')
+                self._session.headers['User-Agent'] = str(self.user_agent)
         if 'delay' in kwargs:
             delay = kwargs.pop('delay')
             if delay < 30:
@@ -173,9 +176,7 @@ class Client(metaclass=_ClientMeta):
         """
         if not self._session or self._session.closed:
             headers = {
-                'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
-                              f'used by nation={self.user_agent.nation_name} in script={self.user_agent.script_name} '
-                              f'v{self.user_agent.script_version}'
+                'User-Agent': str(self.user_agent)
             }
             self._session = aiohttp.ClientSession(headers=headers)
         task = asyncio.create_task(self._mass_queue(template, group, region))
