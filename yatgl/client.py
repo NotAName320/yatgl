@@ -147,9 +147,7 @@ class Client(metaclass=_ClientMeta):
             self._tg_task = asyncio.create_task(self._process_queue())
             if not self._session or self._session.closed:
                 headers = {
-                    'User-Agent': f'yatgl v{VERSION} Developed by nation=Notanam, '
-                                  f'used by nation={self.user_agent.nation_name} in '
-                                  f'script={self.user_agent.script_name} v{self.user_agent.script_version}'
+                    'User-Agent': str(self.user_agent)
                 }
                 self._session = aiohttp.ClientSession(headers=headers)
             await self._tg_task
