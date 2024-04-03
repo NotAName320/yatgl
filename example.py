@@ -38,7 +38,8 @@ async def main():
 
         # or you can use multiple with asyncio.gather e.g.
         # func1 = Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_FOUNDS)
-        # func2 = Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_REGION_MEMBERS, 'testregionia')
+        # func2 = Client().mass_telegram(Template('secret key', 'tgid'), NationGroup.NEW_REGION_MEMBERS,
+        #                                region='testregionia')
         # await asyncio.gather(func1, func2)
     except KeyboardInterrupt:
         await Client().stop()

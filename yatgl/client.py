@@ -29,7 +29,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 API_URL = 'https://www.nationstates.net/cgi-bin/api.cgi'
-VERSION = '1.0.5'
+VERSION = '1.0.6'
 
 
 logger = getLogger(__name__)
@@ -63,6 +63,8 @@ class NationGroup(Enum):
     ALL_WA_DELEGATES = 3
     NEW_REGION_MEMBERS = 4
     ALL_REGION_MEMBERS = 5
+    DELEGATES_APPROVING = 7
+    DELEGATES_NOT_APPROVING = 9
 
 
 class _ClientMeta(type):
@@ -163,25 +165,30 @@ class Client(metaclass=_ClientMeta):
             await self._session.close()
             self._tg_task, self._queueing_tasks = None, []
 
-    async def mass_telegram(self, template: Template, group: NationGroup, region: Iterable[str] = None):
+    async def mass_telegram(self, template: Template, group: NationGroup, *, regions: str | Iterable[str] = None,
+                            proposal: str = None):
         """
         Starts the telegram queue while autoqueueing a certain group of nations using the API.
 
         Ensure that a client key has been provided.
         :param template: The template to send to the nations.
         :param group: The group of nations to target specified by the enum :class:`NationGroup`.
-        :param region: A list of regions.
+        :param regions: A list of regions.
+        :param proposal: A proposal ID.
         """
         if not self._session or self._session.closed:
             headers = {
                 'User-Agent': str(self.user_agent)
             }
             self._session = aiohttp.ClientSession(headers=headers)
-        task = asyncio.create_task(self._mass_queue(template, group, region))
+        task = asyncio.create_task(self._mass_queue(template, group, regions, proposal))
         self._queueing_tasks.append(task)
         await asyncio.gather(self.start(), task)
 
-    async def _mass_queue(self, template: Template, group: NationGroup, regions: str | Iterable[str] | None):
+    async def _mass_queue(self, template: Template, group: NationGroup, regions: str | Iterable[str] | None,
+                          proposal: str | None):
+        if group in {NationGroup.DELEGATES_APPROVING, NationGroup.DELEGATES_NOT_APPROVING} and not proposal:
+            raise AttributeError('Proposal ID not provided to client.')
         if group in {NationGroup.ALL_REGION_MEMBERS, NationGroup.NEW_REGION_MEMBERS} and not regions:
             raise AttributeError('Region(s) not provided to client.')
         elif isinstance(regions, str):
@@ -203,6 +210,16 @@ class Client(metaclass=_ClientMeta):
                 case NationGroup.ALL_WA_DELEGATES:
                     for nation in await self._get_wa_delegates():
                         self.queue_tg(template, nation)
+
+                case NationGroup.DELEGATES_APPROVING:
+                    for nation in await self._get_proposal_delegates_approving(proposal):
+                        self.queue_tg(template, nation)
+
+                case NationGroup.DELEGATES_NOT_APPROVING:
+                    all_delegates_approving = set(await self._get_proposal_delegates_approving(proposal))
+                    for nation in await self._get_wa_delegates():
+                        if nation not in all_delegates_approving:
+                            self.queue_tg(template, nation)
         else:
             # generate a list of nations to not send messages to
             existing = set()
@@ -273,6 +290,23 @@ class Client(metaclass=_ClientMeta):
         async with self._api_request_wait(API_URL, data=data) as resp:
             parsed = BeautifulSoup(await resp.text(), 'xml')
             return parsed.WORLD.NEWNATIONS.string.split(',')
+
+    async def _get_proposal_delegates_approving(self, proposal: str, council='1') -> list[str]:
+        data = {
+            'q': 'proposals',
+            'wa': council
+        }
+
+        async with self._api_request_wait(API_URL, data=data) as resp:
+            parsed = BeautifulSoup(await resp.text(), 'xml')
+            proposal_xml = parsed.find(id=proposal)
+            if proposal_xml:
+                return proposal_xml.APPROVALS.string.split(':')
+
+        if council == '1':
+            return await self._get_proposal_delegates_approving(proposal, '2')
+        else:
+            return []
 
     @asynccontextmanager
     async def _api_request_wait(self, url: str, data: dict):
